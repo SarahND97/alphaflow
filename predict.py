@@ -4,7 +4,7 @@ parser.add_argument('--input_csv', type=str, default='splits/transporters_only.c
 parser.add_argument('--templates_dir', type=str, default=None)
 parser.add_argument('--msa_dir', type=str, default='./alignment_dir')
 parser.add_argument('--mode', choices=['alphafold', 'esmfold'], default='alphafold')
-parser.add_argument('--samples', type=int, default=10)
+parser.add_argument('--samples', type=int, default=0)
 parser.add_argument('--steps', type=int, default=10)
 parser.add_argument('--outpdb', type=str, default='./outpdb/default')
 parser.add_argument('--weights', type=str, default=None)
@@ -12,13 +12,16 @@ parser.add_argument('--ckpt', type=str, default=None)
 parser.add_argument('--original_weights', action='store_true')
 parser.add_argument('--pdb_id', nargs='*', default=[])
 parser.add_argument('--subsample', type=int, default=None)
-parser.add_argument('--resample', action='store_true')
+parser.add_argument('--resample', action='store_true', default=False) # change default to false
 parser.add_argument('--tmax', type=float, default=1.0)
 parser.add_argument('--no_diffusion', action='store_true', default=False)
 parser.add_argument('--self_cond', action='store_true', default=False)
 parser.add_argument('--noisy_first', action='store_true', default=False)
 parser.add_argument('--runtime_json', type=str, default=None)
 parser.add_argument('--no_overwrite', action='store_true', default=False)
+parser.add_argument('--folddock', action='store_true', default=False)
+parser.add_argument('--msas', nargs='*', default=None)
+
 args = parser.parse_args()
 
 import torch, tqdm, os, wandb, json, time
@@ -30,7 +33,7 @@ from alphaflow.data.data_modules import collate_fn
 from alphaflow.model.wrapper import AlphaFoldWrapper, ESMFoldWrapper
 from alphaflow.utils.tensor_utils import tensor_tree_map
 import alphaflow.utils.protein as protein
-from alphaflow.data.inference import AlphaFoldCSVDataset, CSVDataset
+from alphaflow.data.inference import AlphaFoldCSVDataset, CSVDataset, FoldDockCSVDataset
 from collections import defaultdict
 from openfold.utils.import_weights import import_jax_weights_
 from alphaflow.config import model_config
@@ -68,6 +71,20 @@ def main():
         msa_dir=args.msa_dir,
         templates_dir=args.templates_dir,
     )
+
+    if args.folddock:
+        if args.msas is None:
+            raise ValueError(f"When running folddock mode msas cannot be None")
+
+        valset = {
+            'multimer': FoldDockCSVDataset,
+        }['multimer'](
+            data_cfg,
+            args.input_csv,
+            msas=args.msas,
+            msa_dir=args.msa_dir,
+        )
+
     # valset[0]
     logger.info("Loading the model")
     model_class = {'alphafold': AlphaFoldWrapper, 'esmfold': ESMFoldWrapper}[args.mode]
