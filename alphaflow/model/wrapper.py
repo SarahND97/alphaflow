@@ -464,21 +464,21 @@ class ModelWrapper(pl.LightningModule):
 
 
 class ESMFoldWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
+    def __init__(self, cfg, args, training=False):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = cfg
         self.args = args
         self.model = ESMFold(cfg.model,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-        if training:
-            if args and 'distillation' in args.__dict__ and args.distillation:
-                self.teacher = ESMFold(cfg.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-            self.loss = AlphaFoldLoss(cfg.loss, esmfold=True)
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
-            )
-            self.cached_weights = None
+        # if training:
+        #     if args and 'distillation' in args.__dict__ and args.distillation:
+        #         self.teacher = ESMFold(cfg.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        #     self.loss = AlphaFoldLoss(cfg.loss, esmfold=True)
+        #     self.ema = ExponentialMovingAverage(
+        #         model=self.model, decay=cfg.ema.decay
+        #     )
+        #     self.cached_weights = None
             
         self._log = defaultdict(list)
 
