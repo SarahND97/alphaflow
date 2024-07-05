@@ -51,7 +51,11 @@ class FoldDockCSVDataset:
         feats['pseudo_beta_mask'] = torch.ones(len(item.seqres))
         feats['name'] = item.name
         feats['seqres'] = item.seqres
-
+        # Create an asym_id so that you can get the iptm values
+        asym_id = np.ones((len(item.seqres)))
+        asym_id[:item.seqlen1] = 0
+        feats['asym_id'] = torch.from_numpy(asym_id)
+        
         # Introducing chain breaks
         idx_res = feats['residue_index']
         idx_res[item.seqlen1:] += 200
