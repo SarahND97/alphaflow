@@ -36,11 +36,9 @@ class FoldDockCSVDataset:
         
         mmcif_feats = self.data_pipeline.process_str(item.seqres, item.name)
              
-        print("foldockcsv 1")
         try: msa_id = item.msa_id
         except: msa_id = item.name
-        print("foldockcsv 2")
-        #msa_features = self.og_data_pipeline._process_msa_feats(f'{self.msa_dir}/{msa_id}', item.seqres, alignment_index=None)
+                #msa_features = self.og_data_pipeline._process_msa_feats(f'{self.msa_dir}/{msa_id}', item.seqres, alignment_index=None)
         
 
         #
