@@ -4,7 +4,7 @@ parser.add_argument('--input_csv', type=str, default='splits/transporters_only.c
 parser.add_argument('--templates_dir', type=str, default=None)
 parser.add_argument('--msa_dir', type=str, default='./alignment_dir')
 parser.add_argument('--mode', choices=['alphafold', 'esmfold'], default='alphafold')
-parser.add_argument('--samples', type=int, default=0)
+parser.add_argument('--samples', type=int, default=1)
 parser.add_argument('--steps', type=int, default=10)
 parser.add_argument('--outpdb', type=str, default='./outpdb/default')
 parser.add_argument('--weights', type=str, default=None)
@@ -91,7 +91,7 @@ def main():
 
     if args.weights:
         ckpt = torch.load(args.weights, map_location='cpu')
-        model = model_class(**ckpt['hyper_parameters'], training=False)
+        model = model_class(**ckpt['hyper_parameters'])
         model.model.load_state_dict(ckpt['params'], strict=False)
         model = model.cuda()
         
@@ -120,12 +120,14 @@ def main():
     results = defaultdict(list)
     os.makedirs(args.outpdb, exist_ok=True)
     runtime = defaultdict(list)
+    iptm_scores = []
+    ptm_scores = []
     for i, item in enumerate(valset):
         if args.pdb_id and item['name'] not in args.pdb_id:
             continue
         if args.no_overwrite and os.path.exists(f'{args.outpdb}/{item["name"]}.pdb'):
             continue
-        result = []
+        #result = []
         for j in tqdm.trange(args.samples):
             if args.subsample or args.resample:
                 item = valset[i] # resample MSA
@@ -133,15 +135,22 @@ def main():
             batch = collate_fn([item])
             batch = tensor_tree_map(lambda x: x.cuda(), batch)  
             start = time.time()
-            prots = model.inference(batch, as_protein=True, noisy_first=args.noisy_first,
-                        no_diffusion=args.no_diffusion, schedule=schedule, self_cond=args.self_cond)
+            prots = model.inference(batch, as_protein=False, noisy_first=args.noisy_first,
+                        no_diffusion=args.no_diffusion, schedule=[1.0,0.5,0.0], self_cond=args.self_cond)
             runtime[item['name']].append(time.time() - start)
-            result.append(prots[-1])
+
+            # Save pTM/ipTM scores
+            iptm_scores.append(round(float(prots[-1]["iptm_score"]), 2))
+            ptm_scores.append(round(float(prots[-1]["predicted_tm_score"]), 2))
             
-
-
-        with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
-            f.write(protein.prots_to_pdb(result))
+    # Add pTM/ipTM scores to the input_csv
+    df = pd.read_csv(args.input_csv)
+    df["iptm"] = iptm_scores
+    df["ptm"] = ptm_scores
+    df.to_csv(path_or_buf=args.input_csv, header=True, index=False)
+            
+        #with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
+        #    f.write(protein.prots_to_pdb(result))
 
     if args.runtime_json:
         with open(args.runtime_json, 'w') as f:
