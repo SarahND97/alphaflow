@@ -130,9 +130,7 @@ class FoldDataPipeline:
     
     parsed_msas = []
     parsed_delmat = []
-    print("input_msas: ", input_msas)
     for custom_msa in input_msas:
-      print("custom_msa: ", custom_msa)
       msa = ''.join([line for line in open(custom_msa)])
       if custom_msa[-3:] == 'sto':
         parsed_msa, parsed_deletion_matrix, _ = parsers.parse_stockholm(msa)
