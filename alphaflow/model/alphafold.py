@@ -36,6 +36,7 @@ from .input_stack import InputPairStack
 from .layers import GaussianFourierProjection
 from openfold.model.primitives import Linear
 
+from openfold.utils.loss import compute_tm
 
 class AlphaFold(nn.Module):
     """
@@ -80,6 +81,7 @@ class AlphaFold(nn.Module):
         self.structure_module = StructureModule(
             **self.config["structure_module"],
         )
+        self.config["heads"]["tm"]["enabled"] = True
         self.aux_heads = AuxiliaryHeads(
             self.config["heads"],
         )
@@ -351,6 +353,11 @@ class AlphaFold(nn.Module):
 
         # [*, N, 3]
         outputs['x_prev'] = outputs["final_atom_positions"]
+        
+        # Get the iptm score
+        outputs['iptm_score'] = compute_tm(
+                    outputs["tm_logits"], asym_id=feats["asym_id"], interface=True, **self.config["heads"]["tm"]
+                )
 
         return outputs
 
