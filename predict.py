@@ -20,7 +20,7 @@ parser.add_argument('--noisy_first', action='store_true', default=False)
 parser.add_argument('--runtime_json', type=str, default=None)
 parser.add_argument('--no_overwrite', action='store_true', default=False)
 parser.add_argument('--folddock', action='store_true', default=False)
-parser.add_argument('--msas', nargs='*', default=None)
+parser.add_argument('--output_structure', action='store_true', default=False)
 
 args = parser.parse_args()
 
@@ -47,6 +47,7 @@ config = model_config(
     train=True, 
     low_prec=True
 ) 
+
 schedule = np.linspace(args.tmax, 0, args.steps+1)
 if args.tmax != 1.0:
     schedule = np.array([1.0] + list(schedule))
@@ -73,16 +74,11 @@ def main():
     )
 
     if args.folddock:
-        if args.msas is None:
-            raise ValueError(f"When running folddock mode msas cannot be None")
-
         valset = {
             'multimer': FoldDockCSVDataset,
         }['multimer'](
             data_cfg,
             args.input_csv,
-            msas=args.msas,
-            msa_dir=args.msa_dir,
         )
 
     # valset[0]
@@ -91,6 +87,13 @@ def main():
 
     if args.weights:
         ckpt = torch.load(args.weights, map_location='cpu')
+        # Add arguments to work with newer version of OpenFold
+        ckpt['hyper_parameters']["config"]["model"]["extra_msa"]["extra_msa_stack"]["opm_first"] = False
+        ckpt['hyper_parameters']["config"]["model"]["extra_msa"]["extra_msa_stack"]["fuse_projection_weights"] = False
+        ckpt['hyper_parameters']["config"]["model"]["evoformer_stack"]["no_column_attention"] = False
+        ckpt['hyper_parameters']["config"]["model"]["evoformer_stack"]["opm_first"] = False
+        ckpt['hyper_parameters']["config"]["model"]["evoformer_stack"]["fuse_projection_weights"] = False
+        
         model = model_class(**ckpt['hyper_parameters'])
         model.model.load_state_dict(ckpt['params'], strict=False)
         model = model.cuda()
@@ -113,6 +116,7 @@ def main():
         model = model_class.load_from_checkpoint(args.ckpt, map_location='cpu')
         model.load_ema_weights()
         model = model.cuda()
+
     model.eval()
     
     logger.info("Model has been loaded")
@@ -122,35 +126,46 @@ def main():
     runtime = defaultdict(list)
     iptm_scores = []
     ptm_scores = []
+
     for i, item in enumerate(valset):
         if args.pdb_id and item['name'] not in args.pdb_id:
             continue
         if args.no_overwrite and os.path.exists(f'{args.outpdb}/{item["name"]}.pdb'):
             continue
-        #result = []
-        for j in tqdm.trange(args.samples):
+
+        for j in tqdm.trange(args.samples): 
             if args.subsample or args.resample:
                 item = valset[i] # resample MSA
-            
+            device = torch.cuda.current_device()
+
+            print("pdbid: ", item["name"])
+            print("seqres_len: ", len(item["seqres"]))
+            print("row: ", i+1)
             batch = collate_fn([item])
             batch = tensor_tree_map(lambda x: x.cuda(), batch)  
             start = time.time()
             prots = model.inference(batch, as_protein=False, noisy_first=args.noisy_first,
-                        no_diffusion=args.no_diffusion, schedule=[1.0,0.5,0.0], self_cond=args.self_cond)
+                        no_diffusion=args.no_diffusion, schedule=[1.0,0.5], self_cond=args.self_cond)
             runtime[item['name']].append(time.time() - start)
-
+            
             # Save pTM/ipTM scores
             iptm_scores.append(round(float(prots[-1]["iptm_score"]), 2))
-            ptm_scores.append(round(float(prots[-1]["predicted_tm_score"]), 2))
-            
+            print("iptm score: ", round(float(prots[-1]["iptm_score"]), 2))
+
+            del batch
+            del prots 
+            torch.cuda.empty_cache()
+
     # Add pTM/ipTM scores to the input_csv
     df = pd.read_csv(args.input_csv)
+    print(args.input_csv)
     df["iptm"] = iptm_scores
-    df["ptm"] = ptm_scores
+    #df["ptm"] = ptm_scores
     df.to_csv(path_or_buf=args.input_csv, header=True, index=False)
-            
-        #with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
-        #    f.write(protein.prots_to_pdb(result))
+
+    # if args.output_structure:  
+    #     with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
+    #        f.write(protein.prots_to_pdb(result))
 
     if args.runtime_json:
         with open(args.runtime_json, 'w') as f:
