@@ -348,7 +348,6 @@ class ModelWrapper(pl.LightningModule):
                     print(name)
 
     def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
-        
         N = batch['aatype'].shape[1]
         device = batch['aatype'].device
         prior = HarmonicPrior(N)
@@ -370,18 +369,20 @@ class ModelWrapper(pl.LightningModule):
             schedule = np.array([1.0, 0.75, 0.5, 0.25, 0.1, 0]) 
         outputs = []
         prev_outputs = None
-        for t, s in zip(schedule[:-1], schedule[1:]):
-            output = self.model(batch, prev_outputs=prev_outputs)
-            pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
-            outputs.append({**output, **batch})
-            noisy = rmsdalign(pseudo_beta, noisy)
-            noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
-            batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
-            batch['t'] = torch.ones(1, device=noisy.device) * s # first one doesn't get the time embedding, last one is ignored :)
-            if self_cond:
-                prev_outputs = output
+        
+        #for t, s in zip(schedule[:-1], schedule[1:]):
 
-        del batch['noised_pseudo_beta_dists'], batch['t']
+        output = self.model(batch, prev_outputs=prev_outputs) # this where the memory increases
+        #    pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
+        outputs.append({**output, **batch})
+        # noisy = rmsdalign(pseudo_beta, noisy)
+        # noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
+        # batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
+        # batch['t'] = torch.ones(1, device=noisy.device) * s # first one doesn't get the time embedding, last one is ignored :)
+            # if self_cond:
+            #     prev_outputs = output
+
+        # del batch['noised_pseudo_beta_dists'], batch['t']
         if as_protein:
             prots = []
             for output in outputs:
