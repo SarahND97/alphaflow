@@ -17,11 +17,11 @@ def seq_to_tensor(seq):
 
 
 class FoldDockCSVDataset:
-    def __init__(self, config, path, msas=None, mmcif_dir=None, msa_dir=None, templates_dir=None):
+    def __init__(self, config, path, msas=None, mmcif_dir=None, templates_dir=None):
         super().__init__()
         self.pdb_chains = pd.read_csv(path, index_col='name')
         self.msas = msas
-        self.msa_dir = msa_dir
+        #self.msa_dir = msa_dir
         self.mmcif_dir = mmcif_dir
         self.data_pipeline = FoldDataPipeline(template_featurizer=None)
         self.og_data_pipeline = DataPipeline(template_featurizer=None)
@@ -36,15 +36,15 @@ class FoldDockCSVDataset:
         
         mmcif_feats = self.data_pipeline.process_str(item.seqres, item.name)
              
+        # /proj/berzelius-2021-29/users/x_sarna/msas/folddock/homomers/7epq/msas
         try: msa_id = item.msa_id
-        except: msa_id = item.name
+        except: raise ValueError("MSA ID must be present in input csv")
                 #msa_features = self.og_data_pipeline._process_msa_feats(f'{self.msa_dir}/{msa_id}', item.seqres, alignment_index=None)
-        
-
         #
         # if self.templates_dir:
         #     feats['extra_all_atom_positions'] = torch.from_numpy(extra_all_atom_positions)
-        msa_features = self.data_pipeline.process(item.name, item.seqres, self.msas, template_search=None)
+        msas = [msa_id+"/"+item.name+"_paired.a3m", msa_id+"/"+item.name+"_fused.a3m"]
+        msa_features = self.data_pipeline.process(item.name, item.seqres, msas, template_search=None)
         data = {**mmcif_feats, **msa_features}
         feats = self.feature_pipeline.process_features(data, mode='predict') 
 
