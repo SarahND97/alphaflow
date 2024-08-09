@@ -222,7 +222,7 @@ def nonensembled_transform_fns(common_cfg, mode_cfg):
         # the masked locations and secret corrupted locations.
         transforms.append(
             data_transforms.make_masked_msa(
-                common_cfg.masked_msa, mode_cfg.masked_msa_replace_fraction
+                common_cfg.masked_msa, mode_cfg.masked_msa_replace_fraction, seed=42
             )
         )
 
