@@ -476,6 +476,8 @@ config = mlc.ConfigDict(
                     "c_hidden_opm": 32,
                     "c_hidden_mul": 128,
                     "c_hidden_pair_att": 32,
+                    "opm_first": False,
+                    "fuse_projection_weights": False,
                     "no_heads_msa": 8,
                     "no_heads_pair": 4,
                     "no_blocks": 4,
@@ -558,6 +560,8 @@ config = mlc.ConfigDict(
                 "clear_cache_between_blocks": False,
                 "tune_chunk_size": tune_chunk_size,
                 "inf": 1e9,
+                "opm_first": False,
+                "fuse_projection_weights": False,
                 "eps": eps,  # 1e-10,
             },
             "structure_module": {
