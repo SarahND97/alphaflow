@@ -36,7 +36,6 @@ from openfold.utils.checkpointing import checkpoint_blocks
 from openfold.utils.chunk_utils import ChunkSizeTuner
 from openfold.utils.tensor_utils import add
 
-
 class InputPairStackBlock(nn.Module):
     def __init__(
         self,
@@ -94,12 +93,14 @@ class InputPairStackBlock(nn.Module):
         mask: torch.Tensor, 
         chunk_size: Optional[int] = None, 
         use_lma: bool = False,
+        use_deepspeed_evo_attention: bool = False,
         inplace_safe: bool = False,
         _mask_trans: bool = True,
         _attn_chunk_size: Optional[int] = None,
     ):
         if(_attn_chunk_size is None):
             _attn_chunk_size = chunk_size
+
 
         single = z #  single_templates[i]
         single_mask = mask # single_templates_masks[i]
@@ -111,6 +112,7 @@ class InputPairStackBlock(nn.Module):
                     chunk_size=_attn_chunk_size,
                     mask=single_mask,
                     use_lma=use_lma,
+                    use_deepspeed_evo_attention = use_deepspeed_evo_attention,
                     inplace_safe=inplace_safe,
                 )
             ),
@@ -124,6 +126,7 @@ class InputPairStackBlock(nn.Module):
                     chunk_size=_attn_chunk_size,
                     mask=single_mask,
                     use_lma=use_lma,
+                    use_deepspeed_evo_attention = use_deepspeed_evo_attention,
                     inplace_safe=inplace_safe,
                 )
             ),
@@ -234,6 +237,7 @@ class InputPairStack(nn.Module):
         mask: torch.tensor,
         chunk_size: int,
         use_lma: bool = False,
+        use_deepspeed_evo_attention: bool = False,
         inplace_safe: bool = False,
         _mask_trans: bool = True,
     ):
@@ -246,19 +250,19 @@ class InputPairStack(nn.Module):
         Returns:
             [*, N_templ, N_res, N_res, C_t] template embedding update
         """
-        
+   
         blocks = [
             partial(
                 b,
                 mask=mask,
                 chunk_size=chunk_size,
                 use_lma=use_lma,
+                use_deepspeed_evo_attention = use_deepspeed_evo_attention,
                 inplace_safe=inplace_safe,
                 _mask_trans=_mask_trans,
             )
             for b in self.blocks
         ]
-
         if(chunk_size is not None and self.chunk_size_tuner is not None):
             assert(not self.training)
             tuned_chunk_size = self.chunk_size_tuner.tune_chunk_size(
@@ -272,13 +276,11 @@ class InputPairStack(nn.Module):
                     _attn_chunk_size=max(chunk_size, tuned_chunk_size // 4),
                 ) for b in blocks
             ]
-
+        
         t, = checkpoint_blocks(
             blocks=blocks,
             args=(t,),
             blocks_per_ckpt=self.blocks_per_ckpt if self.training else None,
         )
-
         t = self.layer_norm(t)
-
         return t
