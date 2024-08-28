@@ -24,7 +24,7 @@ parser.add_argument('--output_structure', action='store_true', default=False)
 
 args = parser.parse_args()
 
-import torch, tqdm, os, wandb, json, time
+import torch, tqdm, os, wandb, json, time, sys
 import pandas as pd
 import pytorch_lightning as pl
 import numpy as np
@@ -52,6 +52,7 @@ schedule = np.linspace(args.tmax, 0, args.steps+1)
 if args.tmax != 1.0:
     schedule = np.array([1.0] + list(schedule))
 loss_cfg = config.loss
+loss_cfg["tm"]["enabled"] = True
 data_cfg = config.data
 data_cfg.common.use_templates = False
 data_cfg.common.max_recycling_iters = 0
@@ -96,6 +97,42 @@ def main():
         
         model = model_class(**ckpt['hyper_parameters'])
         model.model.load_state_dict(ckpt['params'], strict=False)
+    #     # "model.aux_heads.tm.linear.bias" = 0 
+    #     array([-4.5468793 , -1.3962011 ,  0.12423755,  0.582358  ,  0.72530335,
+    #     0.72327983,  0.6544506 ,  0.5602409 ,  0.46188474,  0.35836953,
+    #     0.25972635,  0.17163756,  0.09353891,  0.02472291, -0.03956673,
+    #    -0.11104161, -0.18441692, -0.24141014, -0.28917888, -0.34088472,
+    #    -0.38339797, -0.42175522, -0.458254  , -0.49765205, -0.53524095,
+    #    -0.5708084 , -0.60445297, -0.6347521 , -0.66170347, -0.6906122 ,
+    #    -0.7189371 , -0.7423452 , -0.76839745, -0.7943884 , -0.822024  ,
+    #    -0.8514876 , -0.87905985, -0.9075546 , -0.9386542 , -0.96942323,
+    #    -1.0044348 , -1.0384411 , -1.0774465 , -1.1115216 , -1.1505141 ,
+    #    -1.1909533 , -1.229858  , -1.2763915 , -1.3185207 , -1.3688865 ,
+    #    -1.4157816 , -1.4618886 , -1.5081464 , -1.5589288 , -1.6099547 ,
+    #    -1.6543128 , -1.7057894 , -1.751349  , -1.8023616 , -1.8574717 ,
+    #    -1.9099859 , -1.957704  , -2.0048194 ,  0.56895053], dtype=float32)
+        # "model.aux_heads.tm.linear.weight" = 0
+        # print(model.state_dict()["model.aux_heads.tm.linear.bias"])
+        data = np.load('/proj/berzelius-2021-29/users/x_sarna/programs/af2_2.3.2/alphafold/afdb/params/params_model_3_multimer_v3.npz') # params_model_3_multimer_v3.npz params_model_2_ptm.npz
+
+        # Access the 'weights' array
+        #model.state_dict()["model.aux_heads.tm.linear.weight"] = data['alphafold/alphafold_iteration/predicted_aligned_error_head/logits//weights']
+
+        # Access the 'bias' array
+        #model.state_dict()["model.aux_heads.tm.linear.bias"] = data['alphafold/alphafold_iteration/predicted_aligned_error_head/logits//bias']
+        #print(data['alphafold/alphafold_iteration/predicted_aligned_error_head/logits//weights'].shape)
+
+        #print(model.state_dict()["model.aux_heads.tm.linear.weight"].shape)
+        model.state_dict()["model.aux_heads.tm.linear.weight"].copy_(
+            torch.from_numpy(data['alphafold/alphafold_iteration/predicted_aligned_error_head/logits//weights']).t()
+        )
+
+        model.state_dict()["model.aux_heads.tm.linear.bias"].copy_(
+           torch.from_numpy(data['alphafold/alphafold_iteration/predicted_aligned_error_head/logits//bias'])
+        )
+        #print("pae_head_weight", model.state_dict()["model.aux_heads.tm.linear.weight"])
+        #print(model.state_dict()["model.aux_heads.tm.linear.weight"].shape)
+        #sys.exit()
         model = model.cuda()
         
     
@@ -144,28 +181,34 @@ def main():
             batch = collate_fn([item])
             batch = tensor_tree_map(lambda x: x.cuda(), batch)  
             start = time.time()
-            prots = model.inference(batch, as_protein=False, noisy_first=args.noisy_first,
-                        no_diffusion=args.no_diffusion, schedule=[1.0,0.5], self_cond=args.self_cond)
+            prots, iptms = model.inference(batch, as_protein=True, noisy_first=args.noisy_first,
+                        no_diffusion=args.no_diffusion, schedule=None, self_cond=args.self_cond)
             runtime[item['name']].append(time.time() - start)
             
             # Save pTM/ipTM scores
-            iptm_scores.append(round(float(prots[-1]["iptm_score"]), 2))
-            print("iptm score: ", round(float(prots[-1]["iptm_score"]), 2))
+            #iptm_scores.append(round(float(prots[-1]["iptm_score"]), 2))
+            iptm_scores.append(max(iptms))
+            print("all iptm scores: ", iptms)
+            print("iptm score: ", max(iptms))
+            #print(protein.prots_to_pdb(prots))
+            #print("prots: ", prots)
+            #print("prots[atom_mask]: ", prots[0].atom_mask)
+            # if args.output_structure:  
+            #     with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
+            #         f.write(protein.prots_to_pdb(prots))
 
             del batch
             del prots 
             torch.cuda.empty_cache()
 
     # Add pTM/ipTM scores to the input_csv
-    df = pd.read_csv(args.input_csv)
-    print(args.input_csv)
-    df["iptm"] = iptm_scores
-    #df["ptm"] = ptm_scores
-    df.to_csv(path_or_buf=args.input_csv, header=True, index=False)
+    # df = pd.read_csv(args.input_csv)
+    # print(args.input_csv)
+    # df["iptm_new"] = iptm_scores
+    # #df["ptm"] = ptm_scores
+    # df.to_csv(path_or_buf=args.input_csv, header=True, index=False)
 
-    # if args.output_structure:  
-    #     with open(f'{args.outpdb}/{item["name"]}.pdb', 'w') as f:
-    #        f.write(protein.prots_to_pdb(result))
+
 
     if args.runtime_json:
         with open(args.runtime_json, 'w') as f:
