@@ -39,7 +39,7 @@ from .layers import GaussianFourierProjection
 from openfold.model.primitives import Linear
 
 
-from openfold.utils.loss import compute_tm
+from openfold.utils.loss import compute_tm, compute_predicted_aligned_error
 
 
 from alphaflow.utils.logging import get_logger
@@ -130,7 +130,7 @@ class AlphaFold(nn.Module):
        ################
 
 
-   def _get_input_pair_embeddings(self, dists, mask, long_sequence_inference):
+   def _get_input_pair_embeddings(self, dists, mask, use_lma, use_deepspeed_evo_attention):
        #logger.info("1")
        mask = mask.unsqueeze(-1) * mask.unsqueeze(-2)
       
@@ -146,12 +146,14 @@ class AlphaFold(nn.Module):
 
 
        #logger.info("2")
+       #print("dgam: ", dgram)
        inp_z = self.input_pair_embedding(dgram * mask.unsqueeze(-1))
+       #print("inp_z: ", inp_z) # same for everything, maybe it should be the same for everything? 
        #if not long_sequence_inference:
        #    inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None)
        #else:
        #logger.info("3")
-       inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None, use_lma=False, use_deepspeed_evo_attention=True) 
+       inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None, use_lma=use_lma, use_deepspeed_evo_attention=use_deepspeed_evo_attention) 
        # t: torch.tensor,
        # mask: torch.tensor,
        # chunk_size: int,
@@ -162,7 +164,7 @@ class AlphaFold(nn.Module):
        return inp_z
 
 
-   def _get_extra_input_pair_embeddings(self, dists, mask, long_sequence_inference):
+   def _get_extra_input_pair_embeddings(self, dists, mask, use_lma, use_deepspeed_evo_attention):
 
 
        mask = mask.unsqueeze(-1) * mask.unsqueeze(-2)
@@ -182,7 +184,7 @@ class AlphaFold(nn.Module):
        #if not long_sequence_inference:
        #inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None)
        #else:
-       inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None, use_lma=False, use_deepspeed_evo_attention=True) 
+       inp_z = self.input_pair_stack(inp_z, mask, chunk_size=None, use_lma=use_lma, use_deepspeed_evo_attention=use_deepspeed_evo_attention) 
        return inp_z
   
    def forward(self, batch, prev_outputs=None):
@@ -193,6 +195,7 @@ class AlphaFold(nn.Module):
        feats = batch
        # Primary output dictionary
        outputs = {}
+       outputs["asym_id"] = feats["asym_id"]
 
 
        # # This needs to be done manually for DeepSpeed's sake
@@ -213,17 +216,18 @@ class AlphaFold(nn.Module):
        #print("before n>800: self.globals.offload_inference: ", self.globals.offload_inference)
        # If sequence is longer than 800 amino acids activate long sequence inference
        long_sequence_inference = False
-       # if n > 800:
-       #logger.info("long sequence inference")
-       long_sequence_inference = True
-       self.globals.offload_inference = True
-       self.globals.use_lma = False
        self.globals.use_deepspeed_evo_attention = True
-       self.globals.use_flash = False
-       self.template_config.offload_inference = True
-       self.template_config.template_pair_stack.tune_chunk_size = False
-       self.config.extra_msa.extra_msa_stack.tune_chunk_size = False
-       self.config.evoformer_stack.tune_chunk_size = False # /proj/berzelius-2021-29/users/x_sarna/.cache/torch_extensions/py39_cu116/evoformer_attn
+       self.globals.use_lma = False
+       if n > 800:
+       #logger.info("long sequence inference")
+            long_sequence_inference = True
+            self.globals.offload_inference = True
+            self.globals.use_lma = False
+            self.globals.use_flash = False
+            self.template_config.offload_inference = True
+            self.template_config.template_pair_stack.tune_chunk_size = False
+            self.config.extra_msa.extra_msa_stack.tune_chunk_size = False
+            self.config.evoformer_stack.tune_chunk_size = False # /proj/berzelius-2021-29/users/x_sarna/.cache/torch_extensions/py39_cu116/evoformer_attn
        #print("after n>800: self.globals.offload_inference: ", self.globals.offload_inference)
       
        # Controls whether the model uses in-place operations throughout /proj/berzelius-2021-29/users/x_sarna/.conda/bin/nvcc
@@ -296,7 +300,8 @@ class AlphaFold(nn.Module):
            inp_z = self._get_input_pair_embeddings(
                batch['noised_pseudo_beta_dists'],
                batch['pseudo_beta_mask'],
-               long_sequence_inference,
+               self.globals.use_lma,
+               self.globals.use_deepspeed_evo_attention
            )
            inp_z = inp_z + self.input_time_embedding(self.input_time_projection(batch['t']))[:,None,None]
           
@@ -312,7 +317,8 @@ class AlphaFold(nn.Module):
            inp_z = self._get_input_pair_embeddings(
                z.new_zeros(B, L, L),
                z.new_zeros(B, L),
-               long_sequence_inference,
+               self.globals.use_lma,
+               self.globals.use_deepspeed_evo_attention
            )
            #logger.info("after get_input_pair_embeddings")
            #print("it sure is")
@@ -340,7 +346,8 @@ class AlphaFold(nn.Module):
                extra_inp_z = self._get_extra_input_pair_embeddings(
                    extra_pseudo_beta_dists,
                    batch['pseudo_beta_mask'],
-                   long_sequence_inference,
+                   self.globals.use_lma,
+                   self.globals.use_deepspeed_evo_attention
                )
                del extra_pseudo_beta, extra_pseudo_beta_dists
            else: # otherwise DDP complains
@@ -348,7 +355,8 @@ class AlphaFold(nn.Module):
                extra_inp_z = self._get_extra_input_pair_embeddings(
                    z.new_zeros(B, L, L),
                    z.new_zeros(B, L),
-                   long_sequence_inference,
+                   self.globals.use_lma,
+                   self.globals.use_deepspeed_evo_attention
                ) * 0.0
   
            z = add(z, extra_inp_z, inplace=inplace_safe)
@@ -416,6 +424,9 @@ class AlphaFold(nn.Module):
   
            del input_tensors
        else:
+           #print("z before evoformer: ")
+           #print("z.shape", z.shape)
+           #print(z)
            m, z, s = self.evoformer(
                m,
                z,
@@ -428,6 +439,9 @@ class AlphaFold(nn.Module):
                inplace_safe=inplace_safe,
                _mask_trans=self.config._mask_trans,
            )
+           #print("after evoformer")
+           #print("z.shape: ", z.shape) 
+           #print(z) # z is the exact same before and after the evoformer
 
 
        outputs["msa"] = m[..., :n_seq, :, :]
@@ -468,12 +482,27 @@ class AlphaFold(nn.Module):
 
        # [*, N, 3]
        outputs['x_prev'] = outputs["final_atom_positions"]
-      
+
        # Get the iptm score
-       outputs['iptm_score'] = compute_tm(
-                   outputs["tm_logits"], asym_id=feats["asym_id"], interface=True, **self.config["heads"]["tm"]
-               )
-       del feats["asym_id"], outputs["tm_logits"]
+       # Maybe the logits are the same everytime
+       print("outputs.keys(): ", outputs.keys())
+       print("ptm_score: ", outputs["ptm_score"])
+       print("iptm_score: ", outputs["iptm_score"])
+       #print("calculate iptm")
+       #outputs['iptm_score'] = compute_tm(
+       #            outputs["tm_logits"], asym_id=feats["asym_id"], interface=True, **self.config["heads"]["tm"]
+       #        )
+       # print("calculate pae")        
+       print(outputs["max_predicted_aligned_error"])
+       #pae = compute_predicted_aligned_error(outputs["tm_logits"], **self.config["heads"]["tm"])
+       #print("pae: ", round(float(pae["max_predicted_aligned_error"]),2))
+       #print(max(pae["aligned_confidence_probs"]))
+       # print(outputs["tm_logits"]) # these are 0????? why???? Now it makes sense that these are relative to the size of the proteins
+    #    ptm = compute_tm(
+    #                outputs["tm_logits"], asym_id=feats["asym_id"], interface=False, **self.config["heads"]["tm"]
+    #            )
+    #    print("ptm: ", round(float(ptm),2))     
+       del outputs["tm_logits"]
        # memory increased before this
        # print("iptm score calculations")
        # print(f"Allocated memory: {torch.cuda.memory_allocated(device) / 1024 ** 2:.2f} MB")
