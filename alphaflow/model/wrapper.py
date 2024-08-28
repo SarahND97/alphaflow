@@ -368,28 +368,29 @@ class ModelWrapper(pl.LightningModule):
         if schedule is None:
             schedule = np.array([1.0, 0.75, 0.5, 0.25, 0.1, 0]) 
         outputs = []
+        iptms = []
         prev_outputs = None
         
-        #for t, s in zip(schedule[:-1], schedule[1:]):
+        # for t, s in zip(schedule[:-1], schedule[1:]):
 
         output = self.model(batch, prev_outputs=prev_outputs) # this where the memory increases
-        #    pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
+        #pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
         outputs.append({**output, **batch})
         # noisy = rmsdalign(pseudo_beta, noisy)
         # noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
         # batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
         # batch['t'] = torch.ones(1, device=noisy.device) * s # first one doesn't get the time embedding, last one is ignored :)
-            # if self_cond:
-            #     prev_outputs = output
-
+        # if self_cond:
+        #     prev_outputs = output
+        iptms.append(round(float(outputs[-1]["iptm_score"]),2))
         # del batch['noised_pseudo_beta_dists'], batch['t']
         if as_protein:
             prots = []
             for output in outputs:
                 prots.extend(protein.output_to_protein(output))
-            return prots
+            return prots, iptms
         else:
-            return outputs
+            return outputs. iptms
     
         
     def _compute_validation_metrics(self, 
