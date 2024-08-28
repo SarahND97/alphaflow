@@ -62,6 +62,9 @@ class FoldDockCSVDataset:
         feats['residue_index'] = idx_res
         make_atom14_masks(feats)
 
+        # Add chain index here
+        feats["chain_index"] = asym_id
+
         if self.mmcif_dir is not None:
             pdb_id, chain = item.name.split('_')
             with open(f"{self.mmcif_dir}/{pdb_id[1:3]}/{pdb_id}.cif") as f:
